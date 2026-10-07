@@ -1,0 +1,3060 @@
+do
+	local rawKey = iskeypressed
+	local vk = {
+		[0xA0] = 304,
+		[0xA1] = 303,
+		[0xA2] = 306,
+		[0xA3] = 305,
+		[0x10] = 304,
+		[0x11] = 306,
+		[0x12] = 307,
+		[0x21] = 280,
+		[0x22] = 281,
+		[0x23] = 279,
+		[0x24] = 278,
+		[0x25] = 263,
+		[0x26] = 265,
+		[0x27] = 262,
+		[0x28] = 264,
+		[0x2D] = 277,
+		[0x2E] = 261,
+	}
+	local function down(id)
+		if type(rawKey) ~= "function" then
+			return false
+		end
+		local ok, hit = pcall(rawKey, id)
+		return ok and hit and true or false
+	end
+	iskeypressed = function(code)
+		local n = tonumber(code)
+		if not n then
+			return false
+		end
+		if down(n) then
+			return true
+		end
+		if vk[n] and down(vk[n]) then
+			return true
+		end
+		if n >= 65 and n <= 90 and down(n + 32) then
+			return true
+		end
+		if n >= 0x70 and n <= 0x7B and down(n + 170) then
+			return true
+		end
+		return false
+	end
+end
+
+local Ins
+do
+	local src
+	pcall(function()
+		src = game:HttpGet("https://raw.githubusercontent.com/neaxusxgod-png/INS-ui/main/uilib.min.lua")
+	end)
+	if type(src) ~= "string" or #src < 200 then
+		pcall(function()
+			src = httpget("https://raw.githubusercontent.com/neaxusxgod-png/INS-ui/main/uilib.min.lua")
+		end)
+	end
+	if type(src) == "string" and #src > 200 then
+		src = src:gsub('AddKey%("RightShift", 0xA1%)', 'AddKey("RightShift", 303) AddKey("rightshift", 303) AddKey("rshift", 303)')
+		src = src:gsub('AddKey%("LeftShift", 0xA0%)', 'AddKey("LeftShift", 304) AddKey("leftshift", 304) AddKey("lshift", 304)')
+		src = src:gsub('AddKey%("Shift", 0x10%)', 'AddKey("Shift", 304) AddKey("shift", 304)')
+		src = src:gsub('AddKey%("LeftCtrl", 0xA2%)', 'AddKey("LeftCtrl", 306) AddKey("leftctrl", 306) AddKey("lctrl", 306)')
+		src = src:gsub('AddKey%("RightCtrl", 0xA3%)', 'AddKey("RightCtrl", 305) AddKey("rightctrl", 305) AddKey("rctrl", 305)')
+		src = src:gsub('AddKey%("Ctrl", 0x11%)', 'AddKey("Ctrl", 306) AddKey("ctrl", 306)')
+		local fn, err = loadstring(src)
+		if fn then
+			local ok, lib = pcall(fn)
+			if ok then
+				Ins = lib
+			else
+				print("INS-ui run fail", lib)
+			end
+		else
+			print("INS-ui compile fail", err)
+		end
+	else
+		print("INS-ui download fail")
+	end
+end
+Ins = Ins or INSUI
+
+local uiWindow
+
+local function grabService(id)
+	local ok, svc = pcall(function()
+		return game:GetService(id)
+	end)
+	if ok and svc then
+		return svc
+	end
+	ok, svc = pcall(function()
+		return game[id]
+	end)
+	if ok then
+		return svc
+	end
+	return nil
+end
+
+local Players = grabService("Players")
+local Workspace = workspace or grabService("Workspace")
+local RunService = grabService("RunService")
+local UserInputService = grabService("UserInputService")
+local LocalPlayer = Players and Players.LocalPlayer
+local lp = LocalPlayer
+local cam = Workspace and Workspace.CurrentCamera
+
+local cfg = {
+	suspects = {
+		on = true,
+		chroma = false,
+		tint = Color3.fromRGB(182, 152, 250),
+		shift = -40,
+		size = 13,
+	},
+	cars = {
+		on = true,
+		chroma = false,
+		tint = Color3.fromRGB(232, 210, 255),
+		shift = 0,
+		size = 15,
+	},
+	settings = {
+		grow = 10,
+		reach = 5000,
+		chromaRate = 1.15,
+	},
+	jewelry = {
+		enabled = false,
+		lead = 0,
+		debug = false,
+		status = "Off",
+	},
+	lockpick = {
+		enabled = false,
+		delay = 40,
+		latency = 0,
+		tolerance = 2,
+		status = "Off",
+	},
+	atm = {
+		enabled = false,
+		delay = 50,
+		latency = 0,
+		predictive = false,
+		status = "Off",
+	},
+	crowbar = {
+		enabled = false,
+		delay = 50,
+		latency = 0,
+		margin = 25,
+		aimCenter = false,
+		debug = false,
+		status = "Off",
+	},
+	main = {
+		infFuel = false,
+	},
+	veh = {
+		brake = false,
+		hornBoost = false,
+		hornMph = 250,
+		speedOn = false,
+		speed = 120,
+		speedMultOn = false,
+		speedMult = 2,
+	},
+	gun = {
+		firerate = false,
+		reload = false,
+		status = "Scan once",
+	},
+}
+
+local plus
+
+local INK_FONT = Drawing.Fonts.SystemBold or Drawing.Fonts.System or Drawing.Fonts.UI
+local suspectMarks = {}
+local carMarks = {}
+local lastMarkScan = 0
+local MARK_SCAN_GAP = 0.38
+
+local function originPos()
+	local body = LocalPlayer and LocalPlayer.Character
+	local root = body and body:FindFirstChild("HumanoidRootPart")
+	if root and root.Position then
+		return root.Position
+	end
+	if cam then
+		local cf = nil
+		pcall(function()
+			cf = cam.CFrame
+		end)
+		if cf and cf.Position then
+			return cf.Position
+		end
+		return cam.Position
+	end
+	return nil
+end
+
+local function instKey(inst)
+	if not inst then
+		return nil
+	end
+	local addr = inst.Address
+	if addr == nil then
+		return nil
+	end
+	return tostring(addr)
+end
+
+local function dropInk(slot)
+	if slot and slot.ink then
+		pcall(function()
+			slot.ink:Remove()
+		end)
+		slot.ink = nil
+	end
+end
+
+local function wipeMarks(map)
+	for key, slot in pairs(map) do
+		dropInk(slot)
+		map[key] = nil
+	end
+end
+
+local function makeInk()
+	local ink = Drawing.new("Text")
+	ink.Center = true
+	ink.Outline = true
+	ink.ZIndex = 88
+	ink.Visible = false
+	ink.Font = INK_FONT
+	return ink
+end
+
+local function sizeByRange(base, meters, grow)
+	base = tonumber(base) or 12
+	grow = tonumber(grow) or 0
+	if grow < 1 then
+		return math.max(8, math.floor(base + 0.5))
+	end
+	local t = (tonumber(meters) or 0) / 320
+	if t < 0 then
+		t = 0
+	elseif t > 1 then
+		t = 1
+	end
+	local bump = 1 + (grow / 12) * (t - 0.32)
+	return math.max(8, math.floor(base * bump + 0.5))
+end
+
+local function paintInk(ink, world, caption, tint, pixelShift, px, meters)
+	if not ink then
+		return
+	end
+	if not world or not cam then
+		ink.Visible = false
+		return
+	end
+	local screen, shown = WorldToScreen(world)
+	if not shown or not screen then
+		ink.Visible = false
+		return
+	end
+	local sz = sizeByRange(px, meters, cfg.settings.grow)
+	pcall(function()
+		ink.Font = INK_FONT
+	end)
+	pcall(function()
+		ink.FontSize = sz
+	end)
+	pcall(function()
+		ink.Size = sz
+	end)
+	ink.Text = caption
+	ink.Color = tint
+	ink.Position = Vector2.new(screen.X, screen.Y + (tonumber(pixelShift) or 0))
+	ink.Visible = true
+end
+
+local function chromaTint()
+	local rate = tonumber(cfg.settings.chromaRate) or 1
+	return Color3.fromHSV((os.clock() * rate * 0.23) % 1, 0.68, 1)
+end
+
+local function scanSuspects()
+	if not cfg.suspects.on then
+		wipeMarks(suspectMarks)
+		return
+	end
+	if not Players then
+		return
+	end
+	local alive = {}
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer and plr:FindFirstChild("Is_Wanted") then
+			local head = plr.Character and plr.Character:FindFirstChild("Head")
+			local key = instKey(plr)
+			if head and key then
+				alive[key] = true
+				local slot = suspectMarks[key]
+				if not slot then
+					slot = { ink = makeInk() }
+					suspectMarks[key] = slot
+				end
+				slot.plr = plr
+				slot.part = head
+			end
+		end
+	end
+	for key, slot in pairs(suspectMarks) do
+		if not alive[key] then
+			dropInk(slot)
+			suspectMarks[key] = nil
+		end
+	end
+end
+
+local function carAnchor(model)
+	local body = model and model:FindFirstChild("Body")
+	local base = body and body:FindFirstChild("Base")
+	if base and base.Position then
+		return base
+	end
+	local seat = model and model:FindFirstChild("DriverSeat")
+	if seat and seat.Position then
+		return seat
+	end
+	local hit = nil
+	if body then
+		pcall(function()
+			for _, child in ipairs(body:GetChildren()) do
+				if child.Position then
+					hit = child
+					break
+				end
+			end
+		end)
+	end
+	if hit then
+		return hit
+	end
+	return model and model.PrimaryPart
+end
+
+local function scanCars()
+	if not cfg.cars.on then
+		wipeMarks(carMarks)
+		return
+	end
+	local pack = Workspace and Workspace:FindFirstChild("BountyVehicles")
+	local folder = pack and pack:FindFirstChild("Vehicles")
+	if not folder then
+		wipeMarks(carMarks)
+		return
+	end
+	local alive = {}
+	pcall(function()
+		for _, model in ipairs(folder:GetChildren()) do
+			if model.ClassName == "Model" then
+				local part = carAnchor(model)
+				local key = instKey(model)
+				if part and key then
+					alive[key] = true
+					local slot = carMarks[key]
+					if not slot then
+						slot = { ink = makeInk() }
+						carMarks[key] = slot
+					end
+					slot.model = model
+					slot.part = part
+				end
+			end
+		end
+	end)
+	for key, slot in pairs(carMarks) do
+		if not alive[key] then
+			dropInk(slot)
+			carMarks[key] = nil
+		end
+	end
+end
+
+local function hideMarks(map)
+	for _, slot in pairs(map) do
+		if slot.ink then
+			slot.ink.Visible = false
+		end
+	end
+end
+
+local function drawSuspects(here, reach, wave)
+	if not cfg.suspects.on then
+		hideMarks(suspectMarks)
+		return
+	end
+	local drop = {}
+	for key, slot in pairs(suspectMarks) do
+		local ok = pcall(function()
+			local part = slot.part
+			local plr = slot.plr
+			if not part or not part.Parent or not plr then
+				table.insert(drop, key)
+				return
+			end
+			local pos = part.Position
+			local meters = here and (pos - here).Magnitude or 0
+			if here and meters > reach then
+				slot.ink.Visible = false
+				return
+			end
+			local caption = "WANTED"
+			if type(plr.Name) == "string" and plr.Name ~= "" then
+				caption = plr.Name .. "  WANTED"
+			end
+			paintInk(
+				slot.ink,
+				pos,
+				caption,
+				cfg.suspects.chroma and wave or cfg.suspects.tint,
+				cfg.suspects.shift,
+				cfg.suspects.size,
+				meters
+			)
+		end)
+		if not ok then
+			table.insert(drop, key)
+		end
+	end
+	for i = 1, #drop do
+		local key = drop[i]
+		dropInk(suspectMarks[key])
+		suspectMarks[key] = nil
+	end
+end
+
+local function drawCars(here, reach, wave)
+	if not cfg.cars.on then
+		hideMarks(carMarks)
+		return
+	end
+	local drop = {}
+	for key, slot in pairs(carMarks) do
+		local ok = pcall(function()
+			local model = slot.model
+			local part = slot.part
+			if not model or not part or not part.Parent then
+				table.insert(drop, key)
+				return
+			end
+			local pos = part.Position
+			local size = part.Size
+			local lift = 8
+			if size and size.Y then
+				lift = math.max(size.Y * 0.5, 1) + 6
+			end
+			pos = Vector3.new(pos.X, pos.Y + lift, pos.Z)
+			local meters = here and (pos - here).Magnitude or 0
+			if here and meters > reach then
+				slot.ink.Visible = false
+				return
+			end
+			local caption = string.format("%s  %dm", tostring(model.Name or "car"), math.floor(meters + 0.5))
+			paintInk(
+				slot.ink,
+				pos,
+				caption,
+				cfg.cars.chroma and wave or cfg.cars.tint,
+				cfg.cars.shift,
+				cfg.cars.size,
+				meters
+			)
+		end)
+		if not ok then
+			table.insert(drop, key)
+		end
+	end
+	for i = 1, #drop do
+		local key = drop[i]
+		dropInk(carMarks[key])
+		carMarks[key] = nil
+	end
+end
+
+local function pulseMarks()
+	local now = os.clock()
+	if now - lastMarkScan >= MARK_SCAN_GAP then
+		lastMarkScan = now
+		scanSuspects()
+		scanCars()
+	end
+	if not cam then
+		return
+	end
+	local here = originPos()
+	local reach = tonumber(cfg.settings.reach) or 5000
+	local wave = chromaTint()
+	drawSuspects(here, reach, wave)
+	drawCars(here, reach, wave)
+end
+
+local function findChild(parent, name)
+	if not parent then
+		return nil
+	end
+	local found = nil
+	pcall(function()
+		found = parent:FindFirstChild(name)
+	end)
+	return found
+end
+
+local function getPlayerGui()
+	if not LocalPlayer then
+		return nil
+	end
+	local pg = nil
+	pcall(function()
+		pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+	end)
+	if pg then
+		return pg
+	end
+	return findChild(LocalPlayer, "PlayerGui")
+end
+
+local GUI_OFF = {
+	Visible = 1453,
+	Text = 3576,
+	BackgroundColor3 = 1344,
+	AbsolutePosition = 268,
+	AbsoluteSize = 276,
+}
+
+local function rawAddr(inst)
+	if not inst then
+		return nil
+	end
+	local a = inst.Address
+	if type(a) == "string" then
+		return tonumber(a, 16) or tonumber(a)
+	end
+	return tonumber(a)
+end
+
+local function memRead(kind, address)
+	if not address then
+		return nil
+	end
+	local value = nil
+	pcall(function()
+		value = memory_read(kind, address)
+	end)
+	return value
+end
+
+local function memVisible(inst)
+	local addr = rawAddr(inst)
+	if not addr then
+		return nil
+	end
+	local v = memRead("byte", addr + GUI_OFF.Visible)
+	if v == nil then
+		return nil
+	end
+	return v ~= 0
+end
+
+local function memAbsPos(inst)
+	local pos = nil
+	pcall(function()
+		pos = inst.AbsolutePosition
+	end)
+	if pos and pos.X and pos.Y then
+		return pos.X, pos.Y
+	end
+	local addr = rawAddr(inst)
+	if addr then
+		local base = addr + GUI_OFF.AbsolutePosition
+		local x = memRead("float", base)
+		local y = memRead("float", base + 4)
+		if x and y then
+			return x, y
+		end
+	end
+	return nil, nil
+end
+
+local function memAbsSize(inst)
+	local size = nil
+	pcall(function()
+		size = inst.AbsoluteSize
+	end)
+	if size and size.X and size.Y then
+		return size.X, size.Y
+	end
+	local addr = rawAddr(inst)
+	if addr then
+		local base = addr + GUI_OFF.AbsoluteSize
+		local x = memRead("float", base)
+		local y = memRead("float", base + 4)
+		if x and y then
+			return x, y
+		end
+	end
+	return nil, nil
+end
+
+local function memText(inst)
+	local text = nil
+	pcall(function()
+		text = inst.Text
+	end)
+	if type(text) == "string" and text ~= "" then
+		return text
+	end
+	local addr = rawAddr(inst)
+	if addr then
+		local s = memRead("string", addr + GUI_OFF.Text)
+		if type(s) == "string" and s ~= "" then
+			return s
+		end
+	end
+	return text
+end
+
+local function memColorRGB(inst)
+	local addr = rawAddr(inst)
+	if addr then
+		local base = addr + GUI_OFF.BackgroundColor3
+		local r = memRead("float", base)
+		local g = memRead("float", base + 4)
+		local b = memRead("float", base + 8)
+		if r ~= nil and g ~= nil and b ~= nil then
+			r, g, b = tonumber(r) or 0, tonumber(g) or 0, tonumber(b) or 0
+			if r > 1 or g > 1 or b > 1 then
+				r, g, b = r / 255, g / 255, b / 255
+			end
+			return r, g, b
+		end
+	end
+	local cr, cg, cb
+	pcall(function()
+		local c = inst.BackgroundColor3
+		cr, cg, cb = c.R, c.G, c.B
+	end)
+	if cr then
+		if cr > 1 or cg > 1 or cb > 1 then
+			cr, cg, cb = cr / 255, cg / 255, cb / 255
+		end
+		return cr, cg, cb
+	end
+	return nil, nil, nil
+end
+
+local function viewportSize()
+	local vp = cam and cam.ViewportSize
+	if vp and vp.X and vp.X > 64 and vp.Y and vp.Y > 64 then
+		return vp.X, vp.Y
+	end
+	return nil, nil
+end
+
+local function mouseXY()
+	local m = nil
+	pcall(function()
+		m = lp and lp:GetMouse()
+	end)
+	if not m then
+		return nil, nil
+	end
+	local x, y = m.X, m.Y
+	if type(x) ~= "number" or type(y) ~= "number" then
+		return nil, nil
+	end
+	return x, y
+end
+
+local function clamp(n, a, b)
+	if n < a then
+		return a
+	end
+	if n > b then
+		return b
+	end
+	return n
+end
+
+local function windowFocused()
+	local ok, active = pcall(function()
+		return isrbxactive()
+	end)
+	if not ok then
+		return true
+	end
+	return active
+end
+
+local jewelryBox = nil
+local jewelryVelX, jewelryVelY = 0, 0
+local jewelryLastX, jewelryLastY, jewelryLastT = nil, nil, 0
+
+local debugBox = Drawing.new("Square")
+debugBox.Filled = false
+debugBox.Thickness = 2
+debugBox.Color = Color3.fromRGB(80, 255, 80)
+debugBox.ZIndex = 210
+debugBox.Visible = false
+
+local overlay = Drawing.new("Text")
+overlay.Center = false
+overlay.Outline = true
+overlay.ZIndex = 200
+overlay.Visible = true
+overlay.Size = 16
+overlay.Font = INK_FONT
+overlay.Color = Color3.fromRGB(182, 152, 250)
+overlay.Position = Vector2.new(18, 42)
+
+local jewelryStatus
+local atmStatus
+local crowStatus
+local lockStatus
+
+local crowDebugBar = Drawing.new("Square")
+crowDebugBar.Filled = false
+crowDebugBar.Thickness = 2
+crowDebugBar.Color = Color3.fromRGB(255, 80, 80)
+crowDebugBar.ZIndex = 211
+crowDebugBar.Visible = false
+
+local crowDebugZone = Drawing.new("Square")
+crowDebugZone.Filled = false
+crowDebugZone.Thickness = 2
+crowDebugZone.Color = Color3.fromRGB(80, 255, 120)
+crowDebugZone.ZIndex = 211
+crowDebugZone.Visible = false
+
+local function resolveGreenBox()
+	local pg = getPlayerGui()
+	local menus = pg and findChild(pg, "GameMenus")
+	local cut = menus and findChild(menus, "GlassCutting")
+	if not cut then
+		return nil
+	end
+	local vis = memVisible(cut)
+	local sx, sy = memAbsSize(cut)
+	if vis == false or not sx or sx < 40 or not sy or sy < 40 then
+		return nil
+	end
+	return findChild(cut, "GreenBox")
+end
+
+local function setJewelry(on)
+	cfg.jewelry.enabled = on and true or false
+	notify("Jewelry", cfg.jewelry.enabled and "ON" or "OFF", 2)
+end
+
+task.spawn(function()
+	while true do
+		if cfg.jewelry.enabled then
+			jewelryBox = resolveGreenBox()
+		else
+			jewelryBox = nil
+			cfg.jewelry.status = "Off"
+		end
+		if jewelryStatus then
+			pcall(function()
+				jewelryStatus:SetText("Status: " .. tostring(cfg.jewelry.status))
+			end)
+		end
+		if atmStatus then
+			pcall(function()
+				atmStatus:SetText("Status: " .. tostring(cfg.atm.status))
+			end)
+		end
+		if crowStatus then
+			pcall(function()
+				crowStatus:SetText("Status: " .. tostring(cfg.crowbar.status))
+			end)
+		end
+		if lockStatus then
+			pcall(function()
+				lockStatus:SetText("Status: " .. tostring(cfg.lockpick.status))
+			end)
+		end
+		local jPart = cfg.jewelry.enabled and tostring(cfg.jewelry.status) or "Off"
+		local aPart = cfg.atm.enabled and tostring(cfg.atm.status) or "Off"
+		local cPart = cfg.crowbar.enabled and tostring(cfg.crowbar.status) or "Off"
+		local lPart = cfg.lockpick.enabled and tostring(cfg.lockpick.status) or "Off"
+		overlay.Text = string.format("Jewelry: %s   ATM: %s   Crowbar: %s   Lockpick: %s", jPart, aPart, cPart, lPart)
+		overlay.Visible = cfg.jewelry.enabled or cfg.atm.enabled or cfg.crowbar.enabled or cfg.lockpick.enabled
+		task.wait(0.2)
+	end
+end)
+
+if RunService then
+	RunService.RenderStepped:Connect(function()
+		pcall(function()
+			if not cfg.jewelry.enabled then
+				debugBox.Visible = false
+				jewelryLastX, jewelryLastY = nil, nil
+				return
+			end
+			if not windowFocused() then
+				cfg.jewelry.status = "No Focus"
+				debugBox.Visible = false
+				return
+			end
+			local box = jewelryBox
+			if not box then
+				cfg.jewelry.status = "Start a case"
+				debugBox.Visible = false
+				jewelryLastX, jewelryLastY = nil, nil
+				return
+			end
+			local vw, vh = viewportSize()
+			local x, y = memAbsPos(box)
+			local sx, sy = memAbsSize(box)
+			if not x or not y or not sx or not sy or sx < 4 or sy < 4 then
+				cfg.jewelry.status = "Start a case"
+				debugBox.Visible = false
+				return
+			end
+			if vw and (x < -40 or y < -40 or x > vw + 40 or y > vh + 40 or sx > vw or sy > vh) then
+				cfg.jewelry.status = "Start a case"
+				debugBox.Visible = false
+				return
+			end
+			local cx, cy = x + sx / 2, y + sy / 2
+			local now = os.clock()
+			if jewelryLastX and jewelryLastT > 0 then
+				local dt = now - jewelryLastT
+				if dt > 0 and dt < 0.2 then
+					jewelryVelX = jewelryVelX * 0.4 + ((cx - jewelryLastX) / dt) * 0.6
+					jewelryVelY = jewelryVelY * 0.4 + ((cy - jewelryLastY) / dt) * 0.6
+				end
+			end
+			jewelryLastX, jewelryLastY, jewelryLastT = cx, cy, now
+			local lead = math.max((tonumber(cfg.jewelry.lead) or 0) / 1000, 0)
+			local tx = cx + jewelryVelX * lead
+			local ty = cy + jewelryVelY * lead
+			if vw then
+				tx = clamp(tx, 8, vw - 8)
+				ty = clamp(ty, 8, vh - 8)
+			end
+			local mx, my = mouseXY()
+			if not mx then
+				cfg.jewelry.status = "No mouse"
+				return
+			end
+			local dx = tx - mx
+			local dy = ty - my
+			if vw then
+				dx = clamp(mx + dx, 8, vw - 8) - mx
+				dy = clamp(my + dy, 8, vh - 8) - my
+			end
+			local dist = math.sqrt(dx * dx + dy * dy)
+			local maxStep = 90
+			if dist > maxStep then
+				dx = dx / dist * maxStep
+				dy = dy / dist * maxStep
+			end
+			if dist >= 0.6 then
+				pcall(function()
+					mousemoverel(dx, dy)
+				end)
+			end
+			cfg.jewelry.status = "Following"
+			if cfg.jewelry.debug then
+				debugBox.Position = Vector2.new(x, y)
+				debugBox.Size = Vector2.new(sx, sy)
+				debugBox.Visible = true
+			else
+				debugBox.Visible = false
+			end
+		end)
+	end)
+end
+
+local function looksLikeCode(text)
+	if type(text) ~= "string" then
+		return nil
+	end
+	local s = text:gsub("%s+", "")
+	if #s < 2 or #s > 6 or not s:match("^%w+$") then
+		return nil
+	end
+	return s:upper()
+end
+
+local function gatherCodeNodes(root, depth, out, limit)
+	if not root or depth > 5 or #out >= limit then
+		return
+	end
+	pcall(function()
+		for _, child in ipairs(root:GetChildren()) do
+			if #out >= limit then
+				break
+			end
+			local key = looksLikeCode(memText(child))
+			if key then
+				table.insert(out, { inst = child, key = key })
+			end
+			gatherCodeNodes(child, depth + 1, out, limit)
+		end
+	end)
+end
+
+local function findCodeGrid(hacking)
+	local candidates = {}
+	gatherCodeNodes(hacking, 0, candidates, 300)
+	local groups, bestGroup, bestCount = {}, nil, 0
+	for _, c in ipairs(candidates) do
+		local x, y = memAbsPos(c.inst)
+		local sx, sy = memAbsSize(c.inst)
+		if x and y and sx and sy and sx > 0 and sy > 0 then
+			c.cx = x + sx / 2
+			c.cy = y + sy / 2
+			local sig = string.format("%d:%d", math.floor(sx / 3), math.floor(sy / 3))
+			local g = groups[sig]
+			if not g then
+				g = {}
+				groups[sig] = g
+			end
+			table.insert(g, c)
+			if #g > bestCount then
+				bestGroup, bestCount = g, #g
+			end
+		end
+	end
+	if not bestGroup or bestCount < 6 then
+		return {}
+	end
+	return bestGroup
+end
+
+local function findLitIndex(nodes)
+	local best, bestIdx, sum, count = nil, nil, 0, 0
+	for i, n in ipairs(nodes) do
+		local r, g, b = memColorRGB(n.inst)
+		if r then
+			local bright = r + g + b
+			sum = sum + bright
+			count = count + 1
+			if not best or bright > best then
+				best, bestIdx = bright, i
+			end
+		end
+	end
+	if not bestIdx or count < 2 then
+		return nil
+	end
+	local avg = sum / count
+	if best < avg * 1.12 or (best - avg) < 0.05 then
+		return nil
+	end
+	return bestIdx
+end
+
+local atmState = {
+	session = nil,
+	nodes = {},
+	nodesAt = 0,
+	litIndex = nil,
+	litSince = 0,
+	stepTime = 0.12,
+	succ = {},
+	clickedRound = false,
+	lastClick = 0,
+	lastCode = "",
+	hits = 0,
+}
+
+local function resetAtm(status)
+	atmState.session = nil
+	atmState.nodes = {}
+	atmState.nodesAt = 0
+	atmState.litIndex = nil
+	atmState.succ = {}
+	atmState.clickedRound = false
+	atmState.lastCode = ""
+	cfg.atm.status = status or "Waiting"
+end
+
+local function setAtm(on)
+	cfg.atm.enabled = on and true or false
+	if not cfg.atm.enabled then
+		resetAtm("Off")
+	end
+	notify("ATM", cfg.atm.enabled and "ON" or "OFF", 2)
+end
+
+local function atmInputBlocked()
+	if not windowFocused() then
+		return "No Focus"
+	end
+	return nil
+end
+
+local function moveMouseToward(tx, ty)
+	local vw, vh = viewportSize()
+	if vw then
+		tx = clamp(tx, 8, vw - 8)
+		ty = clamp(ty, 8, vh - 8)
+	end
+	local mx, my = mouseXY()
+	if not mx then
+		return 999
+	end
+	local dx = tx - mx
+	local dy = ty - my
+	if vw then
+		dx = clamp(mx + dx, 8, vw - 8) - mx
+		dy = clamp(my + dy, 8, vh - 8) - my
+	end
+	local dist = math.sqrt(dx * dx + dy * dy)
+	local maxStep = 90
+	if dist > maxStep then
+		dx = dx / dist * maxStep
+		dy = dy / dist * maxStep
+	end
+	if dist >= 0.6 then
+		pcall(function()
+			mousemoverel(dx, dy)
+		end)
+	end
+	return dist
+end
+
+local function findTargetNode(nodes, target)
+	if not target then
+		return nil
+	end
+	for i = 1, #nodes do
+		local n = nodes[i]
+		if looksLikeCode(memText(n.inst)) == target or n.key == target then
+			return n
+		end
+	end
+	return nil
+end
+
+local function stepAtm()
+	if not cfg.atm.enabled then
+		if cfg.atm.status ~= "Off" then
+			resetAtm("Off")
+		end
+		return
+	end
+	if type(memory_read) ~= "function" then
+		cfg.atm.status = "Enable Unsafe LuaU"
+		return
+	end
+	local pg = getPlayerGui()
+	local menus = pg and findChild(pg, "GameMenus")
+	local atmUi = menus and findChild(menus, "ATM")
+	local hacking = atmUi and findChild(atmUi, "Hacking")
+	if not hacking or memVisible(hacking) == false then
+		if atmState.session then
+			resetAtm("Waiting")
+		else
+			cfg.atm.status = "Start an ATM"
+		end
+		return
+	end
+	local sessionId = tostring(hacking.Address or hacking)
+	if atmState.session ~= sessionId then
+		resetAtm("Waiting")
+		atmState.session = sessionId
+	end
+	local selecting = findChild(hacking, "SelectingCode")
+	local now = os.clock()
+	if #atmState.nodes == 0 or now - atmState.nodesAt > 0.25 then
+		atmState.nodes = findCodeGrid(hacking)
+		atmState.nodesAt = now
+	end
+	local nodes = atmState.nodes
+	local total = #nodes
+	if total == 0 then
+		cfg.atm.status = "Scanning grid"
+		return
+	end
+	local target = looksLikeCode(selecting and memText(selecting) or nil)
+	if not target then
+		cfg.atm.status = "Waiting UI"
+		return
+	end
+	if target ~= atmState.lastCode then
+		atmState.lastCode = target
+		atmState.clickedRound = false
+	end
+	local goal = findTargetNode(nodes, target)
+	if not goal then
+		cfg.atm.status = "Scanning " .. target
+		atmState.nodes = {}
+		return
+	end
+	local gx, gy = memAbsPos(goal.inst)
+	local gsx, gsy = memAbsSize(goal.inst)
+	if not gx or not gy or not gsx then
+		cfg.atm.status = "Scanning " .. target
+		return
+	end
+	local blocked = atmInputBlocked()
+	if blocked then
+		cfg.atm.status = blocked
+		return
+	end
+	local dist = moveMouseToward(gx + gsx / 2, gy + (gsy or 18) / 2)
+	local onCell = dist <= math.max((gsx or 20) * 0.35, 10)
+	local lit = findLitIndex(nodes)
+	if lit and lit ~= atmState.litIndex then
+		local prev = atmState.litIndex
+		if prev then
+			atmState.succ[prev] = lit
+			local delta = now - atmState.litSince
+			if delta > 0.01 and delta < 1 then
+				atmState.stepTime = atmState.stepTime * 0.6 + delta * 0.4
+			end
+		end
+		atmState.litIndex = lit
+		atmState.litSince = now
+	end
+	local liveKey = lit and looksLikeCode(memText(nodes[lit].inst)) or nil
+	if not onCell then
+		cfg.atm.status = string.format("Aim %s", target)
+		return
+	end
+	cfg.atm.status = string.format("%s on %s", target, liveKey or "?")
+	if atmState.clickedRound then
+		local cycleTime = math.max(atmState.stepTime * total + 0.3, 0.6)
+		if now - atmState.lastClick <= cycleTime then
+			return
+		end
+		atmState.clickedRound = false
+	end
+	local delay = math.max((tonumber(cfg.atm.delay) or 150) / 1000, 0.03)
+	if now - atmState.lastClick < delay then
+		return
+	end
+	local ready = liveKey == target
+	if not ready and cfg.atm.predictive and lit then
+		local nextIdx = atmState.succ[lit]
+		local nextCell = nextIdx and nodes[nextIdx]
+		if nextCell and looksLikeCode(memText(nextCell.inst)) == target then
+			local latency = math.max((tonumber(cfg.atm.latency) or 40) / 1000, 0)
+			local remain = atmState.stepTime - (now - atmState.litSince)
+			ready = remain <= latency
+		end
+	end
+	if not ready then
+		return
+	end
+	pcall(mouse1click)
+	atmState.lastClick = now
+	atmState.clickedRound = true
+	atmState.hits = atmState.hits + 1
+	cfg.atm.status = string.format("Hit %s (%d)", target, atmState.hits)
+end
+
+task.spawn(function()
+	while true do
+		pcall(stepAtm)
+		task.wait()
+	end
+end)
+
+local function findPath(root, ...)
+	local cur = root
+	for i = 1, select("#", ...) do
+		if not cur then
+			return nil
+		end
+		cur = findChild(cur, select(i, ...))
+	end
+	return cur
+end
+
+local function guiRect(inst)
+	local x, y = memAbsPos(inst)
+	local w, h = memAbsSize(inst)
+	if not x or not y or not w or not h then
+		return nil
+	end
+	return { x = x, y = y, w = w, h = h, cx = x + w / 2, cy = y + h / 2 }
+end
+
+-- Matcha returns AbsolutePosition.Y offset by one viewport height on some UI.
+-- Without this, GUI clicks clamp to the bottom of the screen.
+local function guiScreenRect(inst)
+	local rect = guiRect(inst)
+	if not rect then
+		return nil
+	end
+	local _, vh = viewportSize()
+	if vh and rect.y >= vh then
+		local n = math.floor(rect.y / vh)
+		rect.y = rect.y - n * vh
+		rect.cy = rect.y + rect.h / 2
+	end
+	return rect
+end
+
+local function inViewport(inst, pad)
+	local rect = guiRect(inst)
+	local vw, vh = viewportSize()
+	if not rect or not vw then
+		return false
+	end
+	pad = pad or 8
+	return rect.y < vh - pad and (rect.y + rect.h) > pad and rect.x < vw - pad and (rect.x + rect.w) > pad
+end
+
+local function uiShowing(inst)
+	if not inst then
+		return false
+	end
+	if memVisible(inst) == false then
+		return false
+	end
+	local w, h = memAbsSize(inst)
+	if not w or w < 40 or not h or h < 40 then
+		return false
+	end
+	local vw, vh = viewportSize()
+	local x, y = memAbsPos(inst)
+	if vw and y then
+		if y >= vh - 8 or (y + h) <= 8 then
+			return false
+		end
+	end
+	if vw and x then
+		if x >= vw - 8 or (x + w) <= 8 then
+			return false
+		end
+	end
+	return true
+end
+
+local function crowbarBlocked()
+	if not windowFocused() then
+		return "No Focus"
+	end
+	return nil
+end
+
+local function clickAtGui(inst, maxDist)
+	local rect = guiScreenRect(inst)
+	if not rect then
+		return false, 999
+	end
+	local dist = moveMouseToward(rect.cx, rect.cy)
+	if dist > (maxDist or 12) then
+		return false, dist
+	end
+	pcall(mouse1click)
+	return true, dist
+end
+
+local function hideCrowDebug()
+	crowDebugBar.Visible = false
+	crowDebugZone.Visible = false
+end
+
+local crowBarState = {
+	barX = nil,
+	barT = 0,
+	vel = 0,
+	frameDt = nil,
+	staticSince = nil,
+	lastClick = 0,
+	hits = 0,
+}
+
+local numHackState = {
+	session = nil,
+	seq = {},
+	lastDigit = nil,
+	lastDigitAt = 0,
+	lastVisible = false,
+	hiddenSince = 0,
+	shownAt = 0,
+	seenDigit = nil,
+	seenCount = 0,
+	playing = false,
+	playIndex = 1,
+	lastClick = 0,
+	goClicked = false,
+	startWasOpen = false,
+	rounds = 0,
+}
+
+local function resetNumHack(status)
+	numHackState.session = nil
+	numHackState.seq = {}
+	numHackState.lastDigit = nil
+	numHackState.lastDigitAt = 0
+	numHackState.lastVisible = false
+	numHackState.hiddenSince = 0
+	numHackState.shownAt = 0
+	numHackState.seenDigit = nil
+	numHackState.seenCount = 0
+	numHackState.playing = false
+	numHackState.playIndex = 1
+	numHackState.goClicked = false
+	numHackState.startWasOpen = false
+	numHackState.rounds = 0
+	if status then
+		cfg.crowbar.status = status
+	end
+end
+
+local wireState = {
+	session = nil,
+	index = 1,
+	phase = "aim",
+	held = false,
+	lastDone = 0,
+	releasedAt = 0,
+	nearSince = 0,
+	currentColor = nil,
+	done = {},
+}
+
+local function resetWires(status)
+	if wireState.held then
+		pcall(mouse1release)
+	end
+	wireState.session = nil
+	wireState.index = 1
+	wireState.phase = "aim"
+	wireState.held = false
+	wireState.releasedAt = 0
+	wireState.nearSince = 0
+	wireState.currentColor = nil
+	wireState.done = {}
+	if status then
+		cfg.crowbar.status = status
+	end
+end
+
+local function resetCrowbar(status)
+	crowBarState.barX = nil
+	crowBarState.vel = 0
+	crowBarState.staticSince = nil
+	hideCrowDebug()
+	resetNumHack()
+	resetWires()
+	cfg.crowbar.status = status or "Waiting"
+end
+
+local function setCrowbar(on)
+	cfg.crowbar.enabled = on and true or false
+	if not cfg.crowbar.enabled then
+		resetCrowbar("Off")
+	end
+	notify("Crowbar", cfg.crowbar.enabled and "ON" or "OFF", 2)
+end
+
+local function parseDigit(text)
+	if type(text) ~= "string" then
+		return nil
+	end
+	local d = tonumber(text:match("(%d)"))
+	if d and d >= 1 and d <= 6 then
+		return tostring(d)
+	end
+	return nil
+end
+
+local function trackCrowBar(rect, now)
+	local prevX, prevT = crowBarState.barX, crowBarState.barT
+	crowBarState.barX, crowBarState.barT = rect.cx, now
+	if not prevX or prevT <= 0 then
+		crowBarState.vel = 0
+		return
+	end
+	local dt = now - prevT
+	if dt <= 0 or dt > 0.25 then
+		crowBarState.vel = 0
+		return
+	end
+	crowBarState.frameDt = dt
+	local v = (rect.cx - prevX) / dt
+	if crowBarState.vel ~= 0 and v ~= 0 and (v > 0) ~= (crowBarState.vel > 0) then
+		crowBarState.vel = v
+	else
+		crowBarState.vel = crowBarState.vel * 0.5 + v * 0.5
+	end
+end
+
+local function stepCrowbarBar(menus, now)
+	local crow = findChild(menus, "Crowbar")
+	local main = findChild(crow, "Main")
+	local gameF = findChild(main, "Game")
+	local bar = findChild(gameF, "Indicator")
+	local zone = findChild(gameF, "Target")
+	if not bar or not zone then
+		return false
+	end
+	if memVisible(crow) ~= true or memVisible(main) == false then
+		return false
+	end
+	local barRect = guiRect(bar)
+	local zoneRect = guiRect(zone)
+	if not barRect or not zoneRect or zoneRect.w < 4 then
+		return false
+	end
+	if not inViewport(zone, 20) then
+		return false
+	end
+	if cfg.crowbar.debug then
+		crowDebugBar.Position = Vector2.new(barRect.x, barRect.y)
+		crowDebugBar.Size = Vector2.new(barRect.w, barRect.h)
+		crowDebugBar.Visible = true
+		crowDebugZone.Position = Vector2.new(zoneRect.x, zoneRect.y)
+		crowDebugZone.Size = Vector2.new(zoneRect.w, zoneRect.h)
+		crowDebugZone.Visible = true
+	else
+		hideCrowDebug()
+	end
+	trackCrowBar(barRect, now)
+	if math.abs(crowBarState.vel) < 5 then
+		crowBarState.staticSince = crowBarState.staticSince or now
+		if memVisible(crow) ~= true and now - crowBarState.staticSince > 0.45 then
+			hideCrowDebug()
+			return false
+		end
+		cfg.crowbar.status = "Timing: wait"
+		return true
+	end
+	crowBarState.staticSince = nil
+	local latency = math.max((tonumber(cfg.crowbar.latency) or 70) / 1000, 0)
+	local frameDt = math.min(crowBarState.frameDt or (1 / 60), 0.05)
+	local marginPct = math.min(math.max(tonumber(cfg.crowbar.margin) or 25, 0), 45) / 100
+	local inset = zoneRect.w * marginPct / 2
+	local fromX = barRect.cx + crowBarState.vel * latency
+	local toX = fromX + crowBarState.vel * frameDt
+	local lo, hi = math.min(fromX, toX), math.max(fromX, toX)
+	local ready
+	if cfg.crowbar.aimCenter then
+		local tol = math.max(zoneRect.w * 0.15, 2)
+		ready = lo <= zoneRect.cx + tol and hi >= zoneRect.cx - tol
+	else
+		ready = lo <= zoneRect.x + zoneRect.w - inset and hi >= zoneRect.x + inset
+	end
+	cfg.crowbar.status = string.format("Timing %.0fpx/s", crowBarState.vel)
+	local delay = math.max((tonumber(cfg.crowbar.delay) or 140) / 1000, 0.05)
+	if now - crowBarState.lastClick < delay then
+		cfg.crowbar.status = "Timing cooldown"
+		return true
+	end
+	local blocked = crowbarBlocked()
+	if blocked then
+		cfg.crowbar.status = blocked
+		return true
+	end
+	if ready then
+		pcall(mouse1click)
+		crowBarState.lastClick = now
+		crowBarState.hits = crowBarState.hits + 1
+		cfg.crowbar.status = string.format("Timing hit %d", crowBarState.hits)
+	end
+	return true
+end
+
+local function numbersShowing(root)
+	if not root then
+		return false
+	end
+	return memVisible(root) == true
+end
+
+local function startOverlayOpen(startF)
+	if not startF then
+		return false
+	end
+	return memVisible(startF) == true
+end
+
+local function stepNumbersHack(menus, now)
+	local root = findChild(menus, "NumbersHack")
+	if memVisible(root) == false then
+		if numHackState.session then
+			resetNumHack()
+		end
+		return false
+	end
+	if not numbersShowing(root) then
+		return false
+	end
+	hideCrowDebug()
+	local sessionId = tostring(root.Address or root)
+	if numHackState.session ~= sessionId then
+		resetNumHack()
+		numHackState.session = sessionId
+	end
+	local screen = findPath(root, "Background", "ScreenBase", "ScreenUIBase")
+	local main = findChild(screen, "MainScreen")
+	local startF = findChild(main, "Start")
+	local currentImg = findChild(main, "CurrentNumber")
+	local current = findChild(currentImg, "Number") or currentImg
+	local buttons = findChild(screen, "NumberButtons")
+	local blocked = crowbarBlocked()
+	local startOpen = startOverlayOpen(startF)
+	if startOpen then
+		if not numHackState.startWasOpen then
+			numHackState.goClicked = false
+			numHackState.seq = {}
+			numHackState.playing = false
+			numHackState.playIndex = 1
+			numHackState.lastDigit = nil
+			numHackState.lastVisible = false
+			numHackState.hiddenSince = 0
+			numHackState.shownAt = 0
+			numHackState.seenDigit = nil
+			numHackState.seenCount = 0
+			numHackState.rounds = 0
+		end
+		numHackState.startWasOpen = true
+		if blocked then
+			cfg.crowbar.status = blocked
+			return true
+		end
+		local go = findChild(startF, "GO")
+		if not go then
+			cfg.crowbar.status = "Press GO"
+			return true
+		end
+		if now - numHackState.lastClick < 0.35 then
+			cfg.crowbar.status = "Numbers: starting"
+			return true
+		end
+		if select(1, clickAtGui(go, 18)) then
+			numHackState.lastClick = now
+			cfg.crowbar.status = "Numbers: GO"
+		else
+			cfg.crowbar.status = "Numbers: aim GO"
+		end
+		return true
+	end
+	if numHackState.startWasOpen then
+		numHackState.goClicked = true
+	end
+	numHackState.startWasOpen = false
+	if numHackState.playing then
+		if blocked then
+			cfg.crowbar.status = blocked
+			return true
+		end
+		local digit = numHackState.seq[numHackState.playIndex]
+		if not digit then
+			numHackState.playing = false
+			numHackState.seq = {}
+			numHackState.playIndex = 1
+			numHackState.lastDigit = nil
+			numHackState.lastVisible = false
+			numHackState.hiddenSince = 0
+			numHackState.shownAt = 0
+			numHackState.seenDigit = nil
+			numHackState.seenCount = 0
+			numHackState.rounds = numHackState.rounds + 1
+			cfg.crowbar.status = string.format("Numbers round %d done", numHackState.rounds)
+			return true
+		end
+		local btn = buttons and findChild(buttons, digit)
+		if not btn then
+			cfg.crowbar.status = "Numbers: missing " .. digit
+			return true
+		end
+		local delay = math.max((tonumber(cfg.crowbar.delay) or 140) / 1000, 0.2)
+		if now - numHackState.lastClick < delay then
+			cfg.crowbar.status = string.format("Numbers play %s (%d/%d)", digit, numHackState.playIndex, #numHackState.seq)
+			return true
+		end
+		local ok = select(1, clickAtGui(btn, 14))
+		if ok then
+			numHackState.lastClick = now
+			numHackState.playIndex = numHackState.playIndex + 1
+			cfg.crowbar.status = string.format("Numbers click %s", digit)
+		else
+			cfg.crowbar.status = string.format("Numbers aim %s", digit)
+		end
+		return true
+	end
+	local shown = memVisible(currentImg)
+	if shown == true then
+		if not numHackState.lastVisible then
+			numHackState.shownAt = now
+			numHackState.seenDigit = nil
+			numHackState.seenCount = 0
+		end
+		numHackState.lastVisible = true
+		numHackState.hiddenSince = 0
+		local digit = parseDigit(memText(current))
+		if digit then
+			if digit == numHackState.seenDigit then
+				numHackState.seenCount = numHackState.seenCount + 1
+			else
+				numHackState.seenDigit = digit
+				numHackState.seenCount = 1
+			end
+			local stable = (now - (numHackState.shownAt or 0)) >= 0.12 and numHackState.seenCount >= 2
+			local gapOk = (now - (numHackState.lastDigitAt or 0)) >= 0.38
+			if stable and gapOk and digit ~= numHackState.lastDigit and #numHackState.seq < 6 then
+				table.insert(numHackState.seq, digit)
+				numHackState.lastDigit = digit
+				numHackState.lastDigitAt = now
+			end
+		end
+	else
+		if numHackState.lastVisible then
+			numHackState.hiddenSince = now
+		end
+		numHackState.lastVisible = false
+		numHackState.seenDigit = nil
+		numHackState.seenCount = 0
+	end
+	local seq = numHackState.seq
+	if #seq > 0 then
+		cfg.crowbar.status = "Numbers mem " .. table.concat(seq, "")
+	else
+		cfg.crowbar.status = "Numbers: watch"
+	end
+	local hiddenLongEnough = numHackState.hiddenSince > 0 and (now - numHackState.hiddenSince) >= 0.3
+	local lastAged = (now - (numHackState.lastDigitAt or 0)) >= 0.45
+	if #seq >= 6 and shown == false and hiddenLongEnough and lastAged then
+		numHackState.playing = true
+		numHackState.playIndex = 1
+		cfg.crowbar.status = "Numbers replay " .. table.concat(seq, "")
+	end
+	return true
+end
+
+local WIRE_COLORS = { "Blue", "Green", "Red", "Yellow" }
+
+local function wireSide(name)
+	if type(name) ~= "string" then
+		return nil, nil
+	end
+	return name:match("^(%a+)Wire([LR])$")
+end
+
+local function attrStr(inst, key)
+	if not inst then
+		return nil
+	end
+	local value = nil
+	pcall(function()
+		value = inst:GetAttribute(key)
+	end)
+	if type(value) == "string" and value ~= "" then
+		return value
+	end
+	return nil
+end
+
+local function attrTrue(inst, key)
+	if not inst then
+		return false
+	end
+	local value = nil
+	pcall(function()
+		value = inst:GetAttribute(key)
+	end)
+	return value == true
+end
+
+local function guiOverlapGame(a, b)
+	local ar, br = guiRect(a), guiRect(b)
+	if not ar or not br then
+		return false
+	end
+	local aTop, aBot = ar.y - ar.h / 2, ar.y + ar.h / 2
+	local bTop, bBot = br.y - br.h / 2, br.y + br.h / 2
+	return ar.x <= br.x + br.w and br.x <= ar.x + ar.w and bTop <= aBot and aTop <= bBot
+end
+
+local function collectWirePairs(ui)
+	local lefts, rights = {}, {}
+	pcall(function()
+		for _, child in ipairs(ui:GetChildren()) do
+			local color, side = wireSide(child.Name)
+			if color then
+				local rect = guiRect(child)
+				if rect and rect.w > 4 and rect.h > 4 then
+					local drag = findChild(child, "Drag") or child
+					local entry = { frame = child, drag = drag }
+					if side == "L" then
+						lefts[color] = entry
+					else
+						rights[color] = entry
+					end
+				end
+			end
+		end
+	end)
+	local list = {}
+	for i = 1, #WIRE_COLORS do
+		local color = WIRE_COLORS[i]
+		if lefts[color] and rights[color] then
+			table.insert(list, {
+				color = color,
+				left = lefts[color].frame,
+				right = rights[color].frame,
+				leftDrag = lefts[color].drag,
+				rightDrag = rights[color].drag,
+			})
+		end
+	end
+	return list
+end
+
+local function visibleTangle(ui)
+	local folder = findChild(ui, "TangledWires")
+	if not folder then
+		return nil
+	end
+	local best, bestArea = nil, 0
+	pcall(function()
+		for _, child in ipairs(folder:GetChildren()) do
+			if memVisible(child) == true then
+				local w, h = memAbsSize(child)
+				if w and h and w > 40 and h > 40 then
+					local area = w * h
+					if area > bestArea then
+						best, bestArea = child, area
+					end
+				end
+			end
+		end
+	end)
+	return best
+end
+
+local function wireDropTarget(ui, pair)
+	local tangle = visibleTangle(ui)
+	if not tangle then
+		return nil, nil
+	end
+	local wireName = attrStr(pair.right, "WireName")
+		or attrStr(pair.rightDrag, "WireName")
+		or attrStr(findChild(pair.rightDrag, "Contact"), "WireName")
+	if wireName then
+		local wire = findChild(tangle, wireName)
+		local contact = wire and findChild(wire, "Contact")
+		if contact and guiRect(contact) then
+			return contact, tangle
+		end
+	end
+	return nil, tangle
+end
+
+local function wireLightOn(ui, color)
+	local lights = findChild(ui, "WireLights")
+	local light = findChild(lights, color .. "Light")
+	local inner = findPath(light, "Base", "InnerCircle", "Light")
+		or findPath(light, "Base", "InnerCircle")
+	local r, g, b = memColorRGB(inner)
+	return r ~= nil and r > 0.8 and g > 0.8 and b > 0.8
+end
+
+local function wireConnected(ui, pair)
+	if attrTrue(pair.leftDrag, "Connected") or attrTrue(pair.left, "Connected") then
+		return true
+	end
+	return wireLightOn(ui, pair.color)
+end
+
+local function wiresShowing(ui)
+	if not ui then
+		return false
+	end
+	if memVisible(ui) ~= true then
+		return false
+	end
+	local renamed = 0
+	pcall(function()
+		for _, child in ipairs(ui:GetChildren()) do
+			if wireSide(child.Name) then
+				renamed = renamed + 1
+			end
+		end
+	end)
+	if renamed >= 4 then
+		return true
+	end
+	return visibleTangle(ui) ~= nil
+end
+
+local function stepConnectWires(menus, now)
+	local ui = findChild(menus, "ConnectWires")
+	if not wiresShowing(ui) then
+		if wireState.session then
+			resetWires()
+		end
+		return false
+	end
+	hideCrowDebug()
+	if not wireState.session then
+		resetWires()
+		wireState.session = tostring(now)
+		wireState.phase = "aim"
+	end
+	local list = collectWirePairs(ui)
+	if #list == 0 then
+		cfg.crowbar.status = "Wires: scanning"
+		return true
+	end
+	local pair = nil
+	for i = 1, #list do
+		local p = list[i]
+		if wireConnected(ui, p) then
+			wireState.done[p.color] = true
+		elseif not wireState.done[p.color] then
+			pair = p
+			break
+		end
+	end
+	if not pair then
+		cfg.crowbar.status = "Wires done"
+		if wireState.held then
+			pcall(mouse1release)
+			wireState.held = false
+			wireState.phase = "aim"
+		end
+		return true
+	end
+	if wireState.currentColor and wireState.currentColor ~= pair.color then
+		if wireState.held then
+			pcall(mouse1release)
+			wireState.held = false
+		end
+		wireState.phase = "aim"
+		wireState.nearSince = 0
+	end
+	wireState.currentColor = pair.color
+	local blocked = crowbarBlocked()
+	if blocked then
+		if wireState.held then
+			pcall(mouse1release)
+			wireState.held = false
+			wireState.phase = "aim"
+		end
+		cfg.crowbar.status = blocked
+		return true
+	end
+	local delay = math.max((tonumber(cfg.crowbar.delay) or 140) / 1000, 0.12)
+	if wireState.phase == "check" then
+		if wireConnected(ui, pair) then
+			wireState.done[pair.color] = true
+			wireState.phase = "aim"
+			wireState.lastDone = now
+			cfg.crowbar.status = string.format("Wires %s ok", pair.color)
+			return true
+		end
+		if now - (wireState.releasedAt or 0) < 0.18 then
+			cfg.crowbar.status = string.format("Wires check %s", pair.color)
+			return true
+		end
+		wireState.phase = "aim"
+		wireState.nearSince = 0
+	end
+	if now - wireState.lastDone < delay and wireState.phase == "aim" then
+		cfg.crowbar.status = "Wires cooldown"
+		return true
+	end
+	local grab = guiRect(pair.left) or guiRect(pair.leftDrag)
+	local dropInst, tangle = wireDropTarget(ui, pair)
+	local drop = guiRect(dropInst)
+	if not grab or not drop then
+		cfg.crowbar.status = "Wires: " .. pair.color
+		return true
+	end
+	local aimX, aimY = drop.x + drop.w * 0.5, drop.y
+	if wireState.phase == "aim" then
+		local dist = moveMouseToward(grab.cx, grab.cy)
+		cfg.crowbar.status = string.format("Wires grab %s", pair.color)
+		if dist <= 8 then
+			pcall(mouse1press)
+			wireState.held = true
+			wireState.phase = "hold"
+			wireState.lastDone = now
+			wireState.nearSince = 0
+		end
+		return true
+	end
+	if wireState.phase == "hold" then
+		if now - wireState.lastDone < 0.08 then
+			cfg.crowbar.status = string.format("Wires hold %s", pair.color)
+			return true
+		end
+		wireState.phase = "drag"
+	end
+	local dist = moveMouseToward(aimX, aimY)
+	local dragContact = findChild(pair.leftDrag, "Contact") or findChild(pair.left, "Contact")
+	local onTarget = dragContact and guiOverlapGame(dragContact, dropInst)
+	if not onTarget and dist <= 6 then
+		onTarget = true
+		if dragContact then
+			onTarget = guiOverlapGame(dragContact, dropInst)
+		end
+	end
+	local wrong = false
+	if tangle and dragContact and not onTarget then
+		pcall(function()
+			for _, wire in ipairs(tangle:GetChildren()) do
+				local contact = findChild(wire, "Contact")
+				if contact and contact ~= dropInst and guiOverlapGame(dragContact, contact) then
+					wrong = true
+					break
+				end
+			end
+		end)
+	end
+	if wrong then
+		cfg.crowbar.status = string.format("Wires avoid %s", pair.color)
+		return true
+	end
+	cfg.crowbar.status = string.format("Wires drop %s", pair.color)
+	if onTarget then
+		pcall(mouse1release)
+		wireState.held = false
+		wireState.phase = "check"
+		wireState.releasedAt = now
+		wireState.nearSince = 0
+		cfg.crowbar.status = string.format("Wires check %s", pair.color)
+		return true
+	end
+	if dist <= 8 then
+		wireState.nearSince = wireState.nearSince > 0 and wireState.nearSince or now
+		if now - wireState.nearSince > 0.45 then
+			pcall(mouse1release)
+			wireState.held = false
+			wireState.phase = "aim"
+			wireState.nearSince = 0
+			wireState.lastDone = now
+			cfg.crowbar.status = string.format("Wires retry %s", pair.color)
+		end
+	else
+		wireState.nearSince = 0
+	end
+	return true
+end
+
+local function stepCrowbar()
+	if not cfg.crowbar.enabled then
+		if cfg.crowbar.status ~= "Off" then
+			resetCrowbar("Off")
+		end
+		return
+	end
+	local pg = getPlayerGui()
+	local menus = pg and findChild(pg, "GameMenus")
+	if not menus then
+		cfg.crowbar.status = "Use crowbar on a car"
+		return
+	end
+	local now = os.clock()
+	local numbersUi = findChild(menus, "NumbersHack")
+	local wiresUi = findChild(menus, "ConnectWires")
+	if memVisible(numbersUi) == true then
+		if wireState.held then
+			pcall(mouse1release)
+			wireState.held = false
+			wireState.phase = "aim"
+		end
+		hideCrowDebug()
+		stepNumbersHack(menus, now)
+		return
+	end
+	if memVisible(wiresUi) == true then
+		hideCrowDebug()
+		stepConnectWires(menus, now)
+		return
+	end
+	if stepCrowbarBar(menus, now) then
+		return
+	end
+	hideCrowDebug()
+	if numHackState.session then
+		resetNumHack()
+	end
+	if wireState.session or wireState.held then
+		resetWires()
+	end
+	cfg.crowbar.status = "Use crowbar on a car"
+end
+
+task.spawn(function()
+	while true do
+		pcall(stepCrowbar)
+		task.wait()
+	end
+end)
+
+local lockpickState = {
+	pin = 1,
+	session = nil,
+	lastClick = 0,
+	pinY = nil,
+	pinT = 0,
+	vel = 0,
+}
+
+local function resetLockpick(status)
+	lockpickState.pin = 1
+	lockpickState.session = nil
+	lockpickState.pinY = nil
+	lockpickState.vel = 0
+	cfg.lockpick.status = status or (cfg.lockpick.enabled and "Waiting" or "Off")
+end
+
+local function setLockpick(on)
+	cfg.lockpick.enabled = on and true or false
+	if not cfg.lockpick.enabled then
+		resetLockpick("Off")
+	end
+	notify("Lockpick", cfg.lockpick.enabled and "ON" or "OFF", 2)
+end
+
+local function lockpickBlocked()
+	if not windowFocused() then
+		return "No Focus"
+	end
+	return nil
+end
+
+local function lockShowing(ui)
+	local pick = findChild(ui, "Pick")
+	if pick and inViewport(pick, 8) then
+		local w, h = memAbsSize(pick)
+		if w and w > 40 and h and h > 40 then
+			return true
+		end
+	end
+	return uiShowing(ui)
+end
+
+local function centerY(inst, parent)
+	local node = findChild(inst, "Center") or inst
+	local _, y = memAbsPos(node)
+	if y then
+		return y
+	end
+	local rect = guiRect(parent or inst)
+	return rect and rect.cy or nil
+end
+
+local function pinOverlapsLine(pin, line, pad)
+	local pinC = findChild(pin, "Center") or pin
+	local lineC = findChild(line, "Center") or line
+	local _, py = memAbsPos(pinC)
+	local _, ly = memAbsPos(lineC)
+	local _, ph = memAbsSize(pin)
+	local _, lh = memAbsSize(line)
+	if not py or not ly or not ph or not lh then
+		local pr, lr = guiRect(pin), guiRect(line)
+		if not pr or not lr then
+			return false
+		end
+		pad = pad or 0
+		return (pr.y + pad) < (lr.y + lr.h) and lr.y < (pr.y + pr.h - pad)
+	end
+	pad = pad or 0
+	local pTop, pBot = py - ph / 2 + pad, py + ph / 2 - pad
+	local lTop, lBot = ly - lh / 2, ly + lh / 2
+	return pTop <= lBot and lTop <= pBot
+end
+
+local function trackLockPin(y, now)
+	local prevY, prevT = lockpickState.pinY, lockpickState.pinT
+	lockpickState.pinY, lockpickState.pinT = y, now
+	if not prevY or prevT <= 0 then
+		lockpickState.vel = 0
+		return
+	end
+	local dt = now - prevT
+	if dt <= 0 or dt > 0.25 then
+		lockpickState.vel = 0
+		return
+	end
+	local v = (y - prevY) / dt
+	if lockpickState.vel ~= 0 and v ~= 0 and (v > 0) ~= (lockpickState.vel > 0) then
+		lockpickState.vel = v
+	else
+		lockpickState.vel = lockpickState.vel * 0.5 + v * 0.5
+	end
+end
+
+local function stepLockpick()
+	if not cfg.lockpick.enabled then
+		if cfg.lockpick.status ~= "Off" then
+			resetLockpick("Off")
+		end
+		return
+	end
+	local pg = getPlayerGui()
+	local menus = pg and findChild(pg, "GameMenus")
+	local ui = menus and findChild(menus, "Lockpick")
+	if not lockShowing(ui) then
+		resetLockpick("Use lockpick on a door")
+		return
+	end
+	local pick = findChild(ui, "Pick")
+	local line = pick and findChild(pick, "RedLine")
+	if not pick or not line or not inViewport(pick, 8) then
+		resetLockpick("Use lockpick on a door")
+		return
+	end
+	local sessionId = tostring(pick.Address or pick)
+	if lockpickState.session ~= sessionId then
+		lockpickState.session = sessionId
+		lockpickState.pin = 1
+		lockpickState.pinY = nil
+		lockpickState.vel = 0
+	end
+	if lockpickState.pin > 6 then
+		cfg.lockpick.status = "Done"
+		return
+	end
+	local pin = findChild(pick, tostring(lockpickState.pin))
+	if not pin then
+		cfg.lockpick.status = "Pin " .. tostring(lockpickState.pin)
+		return
+	end
+	local now = os.clock()
+	local py = centerY(pin, pin)
+	if py then
+		trackLockPin(py, now)
+	end
+	local blocked = lockpickBlocked()
+	if blocked then
+		cfg.lockpick.status = blocked
+		return
+	end
+	local delay = math.max((tonumber(cfg.lockpick.delay) or 90) / 1000, 0.04)
+	if now - lockpickState.lastClick < delay then
+		cfg.lockpick.status = "Pin " .. tostring(lockpickState.pin) .. " wait"
+		return
+	end
+	local pad = math.max(tonumber(cfg.lockpick.tolerance) or 2, 0)
+	local ready = pinOverlapsLine(pin, line, pad)
+	if not ready then
+		local latency = math.max((tonumber(cfg.lockpick.latency) or 0) / 1000, 0)
+		if latency > 0 and py and math.abs(lockpickState.vel) > 20 then
+			local ly = centerY(line, line)
+			if ly then
+				local pred = py + lockpickState.vel * latency
+				local toward = (ly - py) * lockpickState.vel > 0
+				if toward and math.abs(pred - ly) <= math.max(pad + 8, 10) then
+					ready = true
+				end
+			end
+		end
+	end
+	cfg.lockpick.status = string.format("Pin %d", lockpickState.pin)
+	if not ready then
+		return
+	end
+	pcall(mouse1click)
+	lockpickState.lastClick = now
+	lockpickState.pin = lockpickState.pin + 1
+	lockpickState.pinY = nil
+	lockpickState.vel = 0
+	if lockpickState.pin > 6 then
+		cfg.lockpick.status = "Done"
+	else
+		cfg.lockpick.status = string.format("Hit %d", lockpickState.pin - 1)
+	end
+end
+
+task.spawn(function()
+	while true do
+		pcall(stepLockpick)
+		task.wait()
+	end
+end)
+
+local mainFx = {}
+
+mainFx.owned = function(model)
+	if not model or not LocalPlayer then
+		return false
+	end
+	local cv = findChild(model, "Control_Values")
+	local owner = cv and findChild(cv, "Owner")
+	local name
+	pcall(function()
+		name = owner and owner.Value
+	end)
+	if name == LocalPlayer.Name then
+		return true
+	end
+	local oid = cv and findChild(cv, "OwnerId")
+	local id
+	pcall(function()
+		id = oid and oid.Value
+	end)
+	return id ~= nil and id == LocalPlayer.UserId
+end
+
+mainFx.drivingModel = function()
+	local pg = getPlayerGui()
+	local gg = pg and findChild(pg, "GameGui")
+	local vg = gg and findChild(gg, "VehicleGui")
+	local vi = vg and findChild(vg, "Vehicle Interface")
+	local carVal = vi and findChild(vi, "Car")
+	local model
+	pcall(function()
+		model = carVal and carVal.Value
+	end)
+	return model, vi
+end
+
+mainFx.writeFuel = function(inst, amount)
+	if not inst then
+		return false
+	end
+	return pcall(function()
+		inst.Value = amount
+	end)
+end
+
+mainFx.maxFuelCache = {}
+mainFx.maxFuelPending = {}
+
+-- Gauge uses Values.Fuel / tune.MaxFuel. MaxFuel depends on the model.
+-- modele (14, 20, 22...). Ecrire 100 envoyait donc l'aiguille hors cadran.
+mainFx.maxFuelOf = function(model)
+	if not model then
+		return nil
+	end
+	local key = tostring(model.Name)
+	local hit = mainFx.maxFuelCache[key]
+	if hit then
+		return hit
+	end
+	-- MaxFuel only lives in the tune module (~0.12s), so resolve off the loop.
+	local dc = findChild(model, "Drive Controller")
+	if dc and not mainFx.maxFuelPending[key] then
+		mainFx.maxFuelPending[key] = true
+		task.spawn(function()
+			local ok, src = pcall(decompile, dc)
+			local n
+			if ok and type(src) == "string" then
+				n = tonumber(string.match(src, '%["MaxFuel"%]%s*=%s*([%d%.]+)'))
+			end
+			mainFx.maxFuelCache[key] = n or 20
+		end)
+	end
+	return nil
+end
+
+mainFx.fillFuelOn = function(model, liveVi)
+	local cv = model and findChild(model, "Control_Values")
+	local fuel = cv and findChild(cv, "CurrentFuel")
+	if not fuel then
+		return false
+	end
+	-- CurrentFuel and Values.Fuel use MaxFuel units, not percent.
+	local top = mainFx.maxFuelOf(model)
+	if not top then
+		return false
+	end
+	local ok = mainFx.writeFuel(fuel, top)
+	local dc = findChild(model, "Drive Controller")
+	local vi = dc and findChild(dc, "Vehicle Interface")
+	local vals = vi and findChild(vi, "Values")
+	mainFx.writeFuel(vals and findChild(vals, "Fuel"), top)
+	local liveVals = liveVi and findChild(liveVi, "Values")
+	mainFx.writeFuel(liveVals and findChild(liveVals, "Fuel"), top)
+	return ok
+end
+
+mainFx.fillFuel = function()
+	local n = 0
+	local driving, liveVi = mainFx.drivingModel()
+	if driving and mainFx.fillFuelOn(driving, liveVi) then
+		n = n + 1
+	end
+	if not Workspace then
+		return n
+	end
+	for _, folderName in ipairs({ "Vehicles", "ATVs" }) do
+		local folder = findChild(Workspace, folderName)
+		if folder then
+			pcall(function()
+				for _, model in ipairs(folder:GetChildren()) do
+					if model ~= driving and mainFx.owned(model) and mainFx.fillFuelOn(model) then
+						n = n + 1
+					end
+				end
+			end)
+		end
+	end
+	return n
+end
+
+task.spawn(function()
+	while true do
+		if cfg.main.infFuel then
+			pcall(mainFx.fillFuel)
+		end
+		-- plus is assigned further down, so index it inside the pcall: as an
+		-- argument it would be evaluated before pcall and kill this thread.
+		pcall(function()
+			if plus and plus.slow then
+				plus.slow()
+			end
+		end)
+		task.wait(0.2)
+	end
+end)
+
+plus = {
+	KEY = { H = 104, Hvk = 72, S = 115, Svk = 83, W = 119, Wvk = 87 },
+	gunCache = nil,
+	gunScanning = false,
+}
+
+plus.hornHeld = function()
+	if plus.keyDown(plus.KEY.H) or plus.keyDown(plus.KEY.Hvk) then
+		return true
+	end
+	if UserInputService then
+		local ok, down = pcall(function()
+			return UserInputService:IsKeyDown(Enum.KeyCode.H)
+		end)
+		if ok and down then
+			return true
+		end
+	end
+	return false
+end
+
+plus.brakeHeld = function()
+	if plus.keyDown(plus.KEY.S) or plus.keyDown(plus.KEY.Svk) then
+		return true
+	end
+	if UserInputService then
+		local ok, down = pcall(function()
+			return UserInputService:IsKeyDown(Enum.KeyCode.S)
+		end)
+		if ok and down then
+			return true
+		end
+	end
+	local _, vi = mainFx.drivingModel()
+	if vi then
+		local vals = findChild(vi, "Values")
+		local br = vals and findChild(vals, "Brake")
+		local n
+		pcall(function()
+			n = br and br.Value
+		end)
+		if type(n) == "number" and n > 0.2 then
+			return true
+		end
+	end
+	return false
+end
+
+plus.boostParts = function(model)
+	if not model then
+		return nil, {}
+	end
+	local seat = findChild(model, "DriverSeat") or findChild(model, "DriveSeat")
+	local parts = {}
+	local function add(inst)
+		if inst then
+			parts[#parts + 1] = inst
+		end
+	end
+	add(seat)
+	if model.PrimaryPart then
+		add(model.PrimaryPart)
+	end
+	local wheels = findChild(model, "Wheels")
+	if wheels then
+		add(findChild(wheels, "FL"))
+		add(findChild(wheels, "FR"))
+		add(findChild(wheels, "RL"))
+		add(findChild(wheels, "RR"))
+	end
+	return seat or parts[1], parts
+end
+
+plus.applyAlong = function(part, flat, along)
+	local vel = part.AssemblyLinearVelocity
+	if not vel then
+		return
+	end
+	local cur = vel.X * flat.X + vel.Z * flat.Z
+	local d = along - cur
+	part.AssemblyLinearVelocity = Vector3.new(vel.X + flat.X * d, vel.Y, vel.Z + flat.Z * d)
+end
+
+plus.flatLook = function(part)
+	if not part or not part.CFrame then
+		return nil
+	end
+	local look = part.CFrame.LookVector
+	local flat = Vector3.new(look.X, 0, look.Z)
+	if flat.Magnitude < 0.05 then
+		return nil
+	end
+	return flat.Unit
+end
+
+plus.throttleHeld = function(vi)
+	if plus.keyDown(plus.KEY.W) or plus.keyDown(plus.KEY.Wvk) then
+		return true
+	end
+	if UserInputService then
+		local ok, down = pcall(function()
+			return UserInputService:IsKeyDown(Enum.KeyCode.W)
+		end)
+		if ok and down then
+			return true
+		end
+	end
+	if not vi then
+		_, vi = mainFx.drivingModel()
+	end
+	if vi then
+		local vals = findChild(vi, "Values")
+		local th = vals and findChild(vals, "Throttle")
+		local n
+		pcall(function()
+			n = th and th.Value
+		end)
+		if type(n) == "number" and n > 0.05 then
+			return true
+		end
+	end
+	return false
+end
+
+plus.speedMultTick = function(dt)
+	if not cfg.veh.speedMultOn then
+		return
+	end
+	local mult = tonumber(cfg.veh.speedMult) or 1
+	if mult <= 1.02 then
+		return
+	end
+	if cfg.veh.speedOn then
+		return
+	end
+	if cfg.veh.brake and plus.brakeHeld() then
+		return
+	end
+	if cfg.veh.hornBoost and plus.hornHeld() then
+		return
+	end
+	local driving, vi = mainFx.drivingModel()
+	if not driving or not plus.throttleHeld(vi) then
+		return
+	end
+	local lookPart, parts = plus.boostParts(driving)
+	local flat = plus.flatLook(lookPart)
+	if not flat or #parts == 0 then
+		return
+	end
+	if type(dt) ~= "number" or dt < 0.008 then
+		dt = 0.016
+	elseif dt > 0.05 then
+		dt = 0.05
+	end
+	local extra = 70 * dt * (mult - 1)
+	local cap = 250 * (155 / 105)
+	local vel = lookPart.AssemblyLinearVelocity
+	if not vel then
+		return
+	end
+	local along = vel.X * flat.X + vel.Z * flat.Z
+	if along >= cap then
+		return
+	end
+	local next = along + extra
+	if next > cap then
+		next = cap
+	end
+	for i = 1, #parts do
+		plus.applyAlong(parts[i], flat, next)
+	end
+end
+
+plus.hornTick = function(dt)
+	if not cfg.veh.hornBoost then
+		return false
+	end
+	if not plus.hornHeld() then
+		return false
+	end
+	local driving = mainFx.drivingModel()
+	local lookPart, parts = plus.boostParts(driving)
+	local flat = plus.flatLook(lookPart)
+	if not flat or #parts == 0 then
+		return false
+	end
+	if type(dt) ~= "number" or dt < 0.008 then
+		dt = 0.016
+	elseif dt > 0.05 then
+		dt = 0.05
+	end
+	local extra = 110 * dt
+	local mph = tonumber(cfg.veh.hornMph) or 250
+	if mph < 80 then
+		mph = 80
+	end
+	local cap = mph * (155 / 105)
+	local vel = lookPart.AssemblyLinearVelocity
+	if not vel then
+		return false
+	end
+	local along = vel.X * flat.X + vel.Z * flat.Z
+	local next = along
+	if along < cap then
+		next = along + extra
+		if next > cap then
+			next = cap
+		end
+	end
+	for i = 1, #parts do
+		plus.applyAlong(parts[i], flat, next)
+	end
+	return true
+end
+
+plus.brakeTick = function()
+	if not cfg.veh.brake then
+		return
+	end
+	if cfg.veh.hornBoost and plus.hornHeld() then
+		return
+	end
+	if not plus.brakeHeld() then
+		return
+	end
+	local driving = mainFx.drivingModel() or plus.closestOwnedVehicle()
+	local lookPart, parts = plus.boostParts(driving)
+	local flat = plus.flatLook(lookPart)
+	if #parts == 0 then
+		return
+	end
+	for i = 1, #parts do
+		local part = parts[i]
+		local vel = part.AssemblyLinearVelocity
+		if not vel then
+		elseif flat then
+			local along = vel.X * flat.X + vel.Z * flat.Z
+			plus.applyAlong(part, flat, along * 0.84)
+		else
+			part.AssemblyLinearVelocity = Vector3.new(vel.X * 0.84, vel.Y, vel.Z * 0.84)
+		end
+	end
+end
+
+plus.keyDown = function(code)
+	if type(iskeypressed) == "function" then
+		local ok, down = pcall(iskeypressed, code)
+		if ok and down then
+			return true
+		end
+	end
+	if UserInputService then
+		local ok, down = pcall(function()
+			return UserInputService:IsKeyDown(code)
+		end)
+		if ok and down then
+			return true
+		end
+	end
+	return false
+end
+
+plus.localRoot = function()
+	local body = LocalPlayer and LocalPlayer.Character
+	return body, body and body:FindFirstChild("HumanoidRootPart"), body and body:FindFirstChild("Humanoid")
+end
+
+plus.vehicleOwned = function(model)
+	return mainFx.owned(model)
+end
+
+plus.eachVehicleFolder = function(fn)
+	if not Workspace then
+		return
+	end
+	for _, folderName in ipairs({ "Vehicles", "ATVs" }) do
+		local folder = findChild(Workspace, folderName)
+		if folder then
+			pcall(function()
+				for _, model in ipairs(folder:GetChildren()) do
+					fn(model)
+				end
+			end)
+		end
+	end
+end
+
+plus.closestOwnedVehicle = function()
+	local here = originPos()
+	local best, bestD
+	plus.eachVehicleFolder(function(model)
+		if not plus.vehicleOwned(model) then
+			return
+		end
+		local seat = findChild(model, "DriverSeat") or findChild(model, "DriveSeat")
+		local pos = seat and seat.Position or (model.PrimaryPart and model.PrimaryPart.Position)
+		if pos and here then
+			local d = (pos - here).Magnitude
+			if not bestD or d < bestD then
+				best, bestD = model, d
+			end
+		end
+	end)
+	if best and bestD and bestD <= 18 then
+		return best, bestD
+	end
+	return nil, bestD
+end
+
+plus.vehicleMovePart = function(model)
+	if not model then
+		return nil
+	end
+	return findChild(model, "DriverSeat") or findChild(model, "DriveSeat") or model.PrimaryPart
+end
+
+plus.unstuck = function()
+	local veh = plus.closestOwnedVehicle()
+	local part = plus.vehicleMovePart(veh)
+	local _, hrp = plus.localRoot()
+	local target = part or hrp
+	if not target or not target.CFrame then
+		return false
+	end
+	return pcall(function()
+		target.CFrame = target.CFrame + Vector3.new(0, 6, 0)
+	end)
+end
+
+-- getgc walks the whole heap and freezes the client (~20s). Do that once per
+-- Roblox session, keep the cache on _G so re-running the hub stays instant,
+-- then refreshgc/applygc write the known addresses without scanning again.
+plus.scanGuns = function(force)
+	if plus.gunScanning or type(getgc) ~= "function" then
+		return
+	end
+	if not force and type(plus.gunCache) == "table" and #plus.gunCache > 0 then
+		pcall(refreshgc, plus.gunCache)
+		cfg.gun.status = string.format("Ready (%d slots)", #plus.gunCache)
+		return
+	end
+	plus.gunScanning = true
+	cfg.gun.status = "Scanning"
+	task.spawn(function()
+		local ok, cache = pcall(getgc, { "FireRate", "ReloadSpeed" })
+		if ok and type(cache) == "table" and #cache > 0 then
+			plus.gunCache = cache
+			rawset(_G, "ERLCCoolerGunCache", cache)
+			cfg.gun.status = string.format("Ready (%d slots)", #cache)
+			notify("Guns", "Ready on " .. tostring(#cache) .. " stat slots", 3)
+		else
+			cfg.gun.status = "Scan failed"
+			notify("Guns", "Scan failed", 3)
+		end
+		plus.gunScanning = false
+	end)
+end
+
+do
+	local cached = rawget(_G, "ERLCCoolerGunCache")
+	if type(cached) == "table" and #cached > 0 then
+		plus.gunCache = cached
+		pcall(refreshgc, cached)
+		cfg.gun.status = string.format("Ready (%d slots)", #cached)
+	end
+end
+
+plus.applyGuns = function()
+	if plus.gunScanning then
+		return
+	end
+	if type(applygc) ~= "function" then
+		cfg.gun.status = "applygc missing"
+		return
+	end
+	-- Never scan from here: the toggles must stay instant. The one heap scan
+	-- runs from scanGuns, then applygc hits the cached addresses for free.
+	if not plus.gunCache then
+		if plus.gunScanning then
+			cfg.gun.status = "Scanning"
+		else
+			cfg.gun.status = "Scan once"
+		end
+		return
+	end
+	if not cfg.gun.firerate and not cfg.gun.reload then
+		cfg.gun.status = string.format("Ready (%d slots)", #plus.gunCache)
+		return
+	end
+	cfg.gun.status = "Active"
+	if cfg.gun.firerate then
+		pcall(applygc, plus.gunCache, "FireRate", 0.05)
+	end
+	-- ReloadSpeed is a duration in seconds (2-6 stock), so small is fast.
+	if cfg.gun.reload then
+		pcall(applygc, plus.gunCache, "ReloadSpeed", 0.1)
+	end
+end
+
+plus.slow = function()
+	plus.applyGuns()
+end
+
+plus.fast = function()
+	local driving = mainFx.drivingModel()
+	local veh = driving or plus.closestOwnedVehicle()
+	local movePart = plus.vehicleMovePart(veh)
+	if movePart then
+		if cfg.veh.speedOn and not (cfg.veh.brake and plus.brakeHeld()) and not (cfg.veh.hornBoost and plus.hornHeld()) then
+			pcall(function()
+				local lookPart, parts = plus.boostParts(veh)
+				local flat = plus.flatLook(lookPart or movePart)
+				if not flat then
+					return
+				end
+				local root = lookPart or movePart
+				local vel = root.AssemblyLinearVelocity
+				if vel and vel.Magnitude > 4 then
+					local spd = tonumber(cfg.veh.speed) or 120
+					if #parts == 0 then
+						plus.applyAlong(root, flat, spd)
+					else
+						for i = 1, #parts do
+							plus.applyAlong(parts[i], flat, spd)
+						end
+					end
+				end
+			end)
+		end
+	end
+	if cfg.main.infFuel then
+		local driving, liveVi = mainFx.drivingModel()
+		if driving then
+			mainFx.fillFuelOn(driving, liveVi)
+		elseif veh then
+			mainFx.fillFuelOn(veh)
+		end
+	end
+end
+
+task.spawn(function()
+	while true do
+		pcall(plus.fast)
+		task.wait(0.055)
+	end
+end)
+
+if RunService then
+	pcall(function()
+		RunService.Heartbeat:Connect(function(dt)
+			pcall(plus.hornTick, dt)
+			pcall(plus.brakeTick)
+			pcall(plus.speedMultTick, dt)
+			-- Chassis reads Values.Fuel in Stepped then copies CurrentFuel.
+			-- Write after Stepped so the next frame sees a full tank.
+			if cfg.main.infFuel then
+				local driving, liveVi = mainFx.drivingModel()
+				if driving then
+					mainFx.fillFuelOn(driving, liveVi)
+				end
+			end
+		end)
+	end)
+end
+
+if not Ins or type(Ins.CreateWindow) ~= "function" then
+	print("UI skipped: INS-ui missing")
+	pcall(notify, "UI", "INS-ui did not load", 6)
+else
+
+pcall(function()
+	Ins:SetAccent(Color3.fromRGB(182, 152, 250), Color3.fromRGB(167, 130, 245))
+end)
+
+uiWindow = Ins:CreateWindow({
+	title = "ERLC but cooler",
+	subtitle = "Mitsuaaki",
+	size = Vector2.new(607, 468),
+	menuKey = "L",
+	accentA = Color3.fromRGB(182, 152, 250),
+	accentB = Color3.fromRGB(167, 130, 245),
+	font = "Proxima",
+	checkboxStyle = true,
+	opacity = 0.95,
+	configFolder = "ERLCCooler",
+	autoSave = false,
+	smartFps = true,
+	gameInput = false,
+	startOpen = true,
+})
+
+Ins:Category("MAIN")
+local tabMain = uiWindow:Tab("Main", "home")
+local subDrive = tabMain:Sub("Drive", "speed")
+local subGun = tabMain:Sub("Weapons", "crosshair")
+local secDrive = subDrive:Section("Vehicle", "Left")
+local secGun = subGun:Section("Local gun stats", "Left")
+
+Ins:Category("ROBBERY")
+local tabRob = uiWindow:Tab("Robbery", "lock")
+local subJewelry = tabRob:Sub("Jewelry", "star")
+local subLock = tabRob:Sub("Lockpick", "key")
+local subAtm = tabRob:Sub("ATM", "grid")
+local subCrow = tabRob:Sub("Crowbar", "box")
+local secJewelry = subJewelry:Section("Jewelry", "Left")
+local secLock = subLock:Section("Lockpick", "Left")
+local secAtm = subAtm:Section("ATM", "Left")
+local secCrow = subCrow:Section("Crowbar", "Left")
+
+Ins:Category("POLICE")
+local tabCop = uiWindow:Tab("Police", "shield")
+local secWanted = tabCop:Section("Wanted", "Left")
+
+Ins:Category("UTILITY")
+local tabUtil = uiWindow:Tab("Utility", "cog")
+local secVehicle = tabUtil:Section("Bounty cars", "Left")
+local secSettings = tabUtil:Section("Marks", "Right")
+pcall(function()
+	uiWindow:AddSettingsTab("gear")
+end)
+
+secJewelry:Toggle("Enable Auto Jewelry", cfg.jewelry.enabled, function(v)
+	setJewelry(v and true or false)
+end)
+secJewelry:Slider("Input Latency", cfg.jewelry.lead, 1, 0, 150, "ms", function(v)
+	cfg.jewelry.lead = tonumber(v) or 0
+end)
+secJewelry:Toggle("Debug Green Box", cfg.jewelry.debug, function(v)
+	cfg.jewelry.debug = v and true or false
+end)
+jewelryStatus = secJewelry:Label(function()
+	return "Status: " .. tostring(cfg.jewelry.status)
+end)
+secJewelry:Info("Keep the cursor inside Roblox, then start a case. Relative mouse only.")
+
+secLock:Toggle("Enable Auto Lockpick", cfg.lockpick.enabled, function(v)
+	setLockpick(v and true or false)
+end)
+secLock:Slider("Click Delay", cfg.lockpick.delay, 1, 40, 300, "ms", function(v)
+	cfg.lockpick.delay = tonumber(v) or 40
+end)
+secLock:Slider("Input Latency", cfg.lockpick.latency, 1, 0, 120, "ms", function(v)
+	cfg.lockpick.latency = tonumber(v) or 0
+end)
+secLock:Slider("Sweet Spot Pad", cfg.lockpick.tolerance, 1, 0, 12, "px", function(v)
+	cfg.lockpick.tolerance = tonumber(v) or 2
+end)
+lockStatus = secLock:Label(function()
+	return "Status: " .. tostring(cfg.lockpick.status)
+end)
+secLock:Info("Walk up and use the lockpick yourself. Clicks when the pin overlaps the red line. Miss = fail.")
+
+secAtm:Toggle("Enable Auto ATM", cfg.atm.enabled, function(v)
+	setAtm(v and true or false)
+end)
+secAtm:Toggle("Predictive Timing", cfg.atm.predictive, function(v)
+	cfg.atm.predictive = v and true or false
+end)
+secAtm:Slider("Click Delay", cfg.atm.delay, 1, 50, 400, "ms", function(v)
+	cfg.atm.delay = tonumber(v) or 50
+end)
+secAtm:Slider("Input Latency", cfg.atm.latency, 1, 0, 150, "ms", function(v)
+	cfg.atm.latency = tonumber(v) or 0
+end)
+atmStatus = secAtm:Label(function()
+	return "Status: " .. tostring(cfg.atm.status)
+end)
+secAtm:Info("Moves the mouse onto the Select Code, then clicks when it lights up.")
+
+secCrow:Toggle("Enable Auto Crowbar", cfg.crowbar.enabled, function(v)
+	setCrowbar(v and true or false)
+end)
+secCrow:Slider("Click Delay", cfg.crowbar.delay, 1, 50, 400, "ms", function(v)
+	cfg.crowbar.delay = tonumber(v) or 50
+end)
+secCrow:Slider("Input Latency", cfg.crowbar.latency, 1, 0, 200, "ms", function(v)
+	cfg.crowbar.latency = tonumber(v) or 0
+end)
+secCrow:Slider("Safe Margin", cfg.crowbar.margin, 1, 0, 45, "%", function(v)
+	cfg.crowbar.margin = tonumber(v) or 25
+end)
+secCrow:Toggle("Aim Center", cfg.crowbar.aimCenter, function(v)
+	cfg.crowbar.aimCenter = v and true or false
+end)
+secCrow:Toggle("Debug Boxes", cfg.crowbar.debug, function(v)
+	cfg.crowbar.debug = v and true or false
+	if not cfg.crowbar.debug then
+		hideCrowDebug()
+	end
+end)
+crowStatus = secCrow:Label(function()
+	return "Status: " .. tostring(cfg.crowbar.status)
+end)
+secCrow:Info("Walk up and use the crowbar. Detects timing bar, number codes, or wires from the visible UI.")
+
+secWanted:Toggle("Draw wanted", cfg.suspects.on, function(v)
+	cfg.suspects.on = v and true or false
+end)
+secWanted:Toggle("Chroma cycle", cfg.suspects.chroma, function(v)
+	cfg.suspects.chroma = v and true or false
+end)
+secWanted:Colorpicker("Ink color", cfg.suspects.tint, function(c)
+	cfg.suspects.tint = c
+end)
+secWanted:Slider("Screen shift", cfg.suspects.shift, 1, -100, 100, "px", function(v)
+	cfg.suspects.shift = tonumber(v) or -40
+end)
+secWanted:Slider("Ink size", cfg.suspects.size, 1, 8, 32, "px", function(v)
+	cfg.suspects.size = tonumber(v) or 13
+end)
+
+secVehicle:Toggle("Draw bounty cars", cfg.cars.on, function(v)
+	cfg.cars.on = v and true or false
+end)
+secVehicle:Toggle("Chroma cycle", cfg.cars.chroma, function(v)
+	cfg.cars.chroma = v and true or false
+end)
+secVehicle:Colorpicker("Ink color", cfg.cars.tint, function(c)
+	cfg.cars.tint = c
+end)
+secVehicle:Slider("Screen shift", cfg.cars.shift, 1, -100, 100, "px", function(v)
+	cfg.cars.shift = tonumber(v) or 0
+end)
+secVehicle:Slider("Ink size", cfg.cars.size, 1, 8, 32, "px", function(v)
+	cfg.cars.size = tonumber(v) or 15
+end)
+
+secSettings:Slider("Distance grow", cfg.settings.grow, 1, 0, 10, "", function(v)
+	cfg.settings.grow = tonumber(v) or 10
+end)
+secSettings:Slider("Draw range", cfg.settings.reach, 50, 100, 10000, "", function(v)
+	cfg.settings.reach = tonumber(v) or 5000
+end)
+secSettings:Slider("Chroma speed", cfg.settings.chromaRate, 0.05, 1, 10, "", function(v)
+	cfg.settings.chromaRate = tonumber(v) or 1.15
+end)
+
+secDrive:Toggle("Horn boost", cfg.veh.hornBoost, function(v)
+	cfg.veh.hornBoost = v and true or false
+	notify("Horn", cfg.veh.hornBoost and "Hold H" or "OFF", 2)
+end, "Hold H (klaxon). Speeds up faster than the engine, ramps, does not snap to max.")
+secDrive:Slider("Horn cap", cfg.veh.hornMph, 5, 80, 300, "mph", function(v)
+	cfg.veh.hornMph = tonumber(v) or 250
+end)
+secDrive:Toggle("Speed lock", cfg.veh.speedOn, function(v)
+	cfg.veh.speedOn = v and true or false
+	notify("Speed", cfg.veh.speedOn and "ON" or "OFF", 2)
+end)
+secDrive:Slider("Lock speed", cfg.veh.speed, 5, 40, 250, "", function(v)
+	cfg.veh.speed = tonumber(v) or 120
+end)
+secDrive:Toggle("Speed multiplier", cfg.veh.speedMultOn, function(v)
+	cfg.veh.speedMultOn = v and true or false
+	notify("Speed mult", cfg.veh.speedMultOn and "ON" or "OFF", 2)
+end, "Hold W. Extra accel on top of the engine, ramps, does not snap. Horn (H) and brake (S) still win.")
+secDrive:Slider("Multiplier", cfg.veh.speedMult, 0.1, 1, 5, "x", function(v)
+	cfg.veh.speedMult = tonumber(v) or 2
+end)
+secDrive:Toggle("Infinite fuel", cfg.main.infFuel, function(v)
+	cfg.main.infFuel = v and true or false
+	if cfg.main.infFuel then
+		mainFx.fillFuel()
+	end
+	notify("Fuel", cfg.main.infFuel and "ON" or "OFF", 2)
+end)
+secDrive:Toggle("Brake", cfg.veh.brake, function(v)
+	cfg.veh.brake = v and true or false
+	notify("Brake", cfg.veh.brake and "ON" or "OFF", 2)
+end, "Hold S to brake hard. Horn boost (H) still works if both are on.")
+
+secDrive:Button("Unstuck", function()
+	local ok = plus.unstuck()
+	notify("Unstuck", ok and "+6 studs" or "No seat/HRP", 2)
+end)
+
+secGun:Button("Scan weapons", function()
+	if plus.gunScanning then
+		notify("Guns", "Already scanning", 2)
+		return
+	end
+	if plus.gunCache then
+		plus.scanGuns(false)
+		notify("Guns", "Refreshed, no freeze", 2)
+		return
+	end
+	notify("Guns", "First scan freezes ~20s, then instant this session", 4)
+	plus.scanGuns(true)
+end)
+secGun:Toggle("Fast firerate", cfg.gun.firerate, function(v)
+	cfg.gun.firerate = v and true or false
+	if not cfg.gun.firerate then
+		notify("Guns", "Firerate OFF", 2)
+	elseif plus.gunCache then
+		notify("Guns", "FireRate 0.05", 2)
+	else
+		notify("Guns", "First scan ~20s, then instant", 4)
+		plus.scanGuns(true)
+	end
+end, "Delay between shots down to 0.05s. First scan of the session freezes ~20s, then it stays instant.")
+secGun:Toggle("Instant reload", cfg.gun.reload, function(v)
+	cfg.gun.reload = v and true or false
+	if not cfg.gun.reload then
+		notify("Guns", "Reload OFF", 2)
+	elseif plus.gunCache then
+		notify("Guns", "ReloadSpeed 0.1s", 2)
+	else
+		notify("Guns", "First scan ~20s, then instant", 4)
+		plus.scanGuns(true)
+	end
+end, "Reload down to 0.1s instead of the stock 2-6s. First scan of the session freezes ~20s, then it stays instant.")
+secGun:Label(function()
+	return "Status: " .. tostring(cfg.gun.status or "Scan once")
+end)
+secGun:Info("Firerate / reload scan the heap once per Roblox session (~20s freeze). After that, Scan weapons and the toggles are instant, even if you re-run the hub. Hold the gun when you do the first scan. Close this menu before shooting.")
+
+task.spawn(function()
+	while true do
+		pcall(pulseMarks)
+		task.wait()
+	end
+end)
+
+pcall(function()
+	Ins:Notify("ERLC but cooler", "L toggles the menu. Change it in Interface.", 3, "success")
+end)
+print("ERLC but cooler loaded")
+print("Menu key = L (change it in Interface)")
+print("UI = INS-ui  |  Main (Drive / Weapons) / Robbery / Police / Utility")
+print("ATM: mouse moves to the code, clicks only when it is highlighted")
+print("Crowbar: timing bar, presses GO, replays 6-number sequences, drags matching wires")
+print("Lockpick: clicks each pin when it overlaps the red line")
+print("Drive: infinite fuel, horn H, speed lock, speed multiplier, brake, unstuck")
+print("Weapons: first scan ~20s once per session, then firerate / reload stay instant")
+print("Police: wanted ESP")
+print("by : Mitsuaaki")
+end
